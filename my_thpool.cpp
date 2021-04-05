@@ -1,5 +1,3 @@
-#define _GNU_SOURCE
-#define _DARWIN_C_SOURCE        // TODO: test in linux
 #define _POSIX_C_SOURCE 200809L
 #include <ctime>
 #include <iostream>
@@ -187,13 +185,13 @@ class ThreadPool;
 class Thread {
  public:
   Thread(ThreadPool* thpool_ptr, int id);
+  int Start();
   int Run();
 
   // Pthreads cannot handle member function directly because of the implicit
   // "this" argument, so this helper function is created to help
   static void* RunHelper(void* context);
 
- private:
   int id_;                         // Customized thread ID
   pthread_t pthread_;              // The actual pthread
   ThreadPool* thpool_ptr_;         // Access to the thread pool
@@ -220,8 +218,6 @@ class ThreadPool {
   pthread_cond_t threads_all_idle_;   // A conditional variable which sends
                                       // signal when no thread is working
   JobQueue jobqueue_;
-
- private:
   std::vector<Thread> thread_vec_;
 };
 
@@ -229,7 +225,9 @@ class ThreadPool {
 Thread::Thread(ThreadPool* thpool_ptr, int id) {
   thpool_ptr_ = thpool_ptr;
   id_ = id;
+}
 
+int Thread::Start() {
   // TODO ("&" need or not?)
   pthread_create(&pthread_,
                  NULL,
@@ -237,8 +235,9 @@ Thread::Thread(ThreadPool* thpool_ptr, int id) {
                  reinterpret_cast<void*>(this));
 
   // So no need to call pthread_join explicitly. It will have the same effect
-  // once the thread exists or returns.
+  // once the thread exits or returns.
   pthread_detach(pthread_);
+  return 0;
 }
 
 // Basically an endless loop (but CPU-friendly). It exits this loop only when
@@ -248,7 +247,6 @@ int Thread::Run() {
   printf("THPOOL_DEBUG: Thread #%d runs\n", id_);
   printf("THPOOL_DEBUG: Thread #%d thpool_ptr_ = %llu\n",
          id_, (unsigned long long)thpool_ptr_);
-  fflush(stdout);
 #endif
 
   // Renames thread
@@ -256,7 +254,6 @@ int Thread::Run() {
 
 // #if THPOOL_DEBUG
 //     printf("THPOOL_DEBUG: Thread #%d renaming\n", id_);
-//     fflush(stdout);
 // #endif
 //     // std::string thread_name;
 //     // std::stringstream ss;
@@ -276,7 +273,6 @@ int Thread::Run() {
 
 #if THPOOL_DEBUG
   printf("THPOOL_DEBUG: Thread #%d renames\n", id_);
-  fflush(stdout);
 #endif
   // TODO (meaning of this statement?)
   // ThreadPool* thpool_ptr = thpool_ptr_;
@@ -287,15 +283,14 @@ int Thread::Run() {
 
 #if THPOOL_DEBUG
   printf("THPOOL_DEBUG: Thread #%d alive\n", id_);
-  fflush(stdout);
 #endif
 
   // The main loop
+  Job job;
   while (threads_keepalive_) {
 
 #if THPOOL_DEBUG
     printf("THPOOL_DEBUG: Thread #%d waits for job\n", id_);
-    fflush(stdout);
 #endif
 
     // Idle and wait
@@ -303,7 +298,6 @@ int Thread::Run() {
 
 #if THPOOL_DEBUG
     printf("THPOOL_DEBUG: Thread #%d starts doing job\n", id_);
-    fflush(stdout);
 #endif
 
     if (threads_keepalive_) {
@@ -313,7 +307,6 @@ int Thread::Run() {
     }
 
     // Gets a job from queue and exeuctes
-    Job job;
     bool job_flag = false;
     thpool_ptr_->jobqueue_.GetFrontAndPop(&job, &job_flag);
     if (job_flag) {
@@ -354,9 +347,16 @@ ThreadPool::ThreadPool(int num_threads) {
   pthread_mutex_init(&mutex_, NULL);
   pthread_cond_init(&threads_all_idle_, NULL);
 
+  // Allocates first, avoids vector from moving Thread elements to change their
+  // addresses
   for (int thread_id = 0; thread_id < num_threads; thread_id++) {
     ThreadPool* thpool_ptr = this;
     thread_vec_.emplace_back(thpool_ptr, thread_id);
+  }
+
+  // Starts pthreads
+  for (int thread_id = 0; thread_id < num_threads; thread_id++) {
+    thread_vec_[thread_id].Start();
 #if THPOOL_DEBUG
     // std::cout << "THPOOL_DEBUG: Created thread " << thread_id << " in pool"
     //          << std::endl;
@@ -387,6 +387,7 @@ ThreadPool::~ThreadPool() {
   double timeout = 1;
   time_t start, end;
   double time_passed = 0.0;
+  time(&start);
   while (time_passed < timeout && num_threads_alive_) {
     jobqueue_.job_counter_.PostAll();
     time(&end);
@@ -469,15 +470,13 @@ int main() {
 
   // ===== Test for ThreadPool
 	printf("Test starts\n");
-  int num_threads = 10;
+  int num_threads = 100;
 	ThreadPool thread_pool(num_threads);
 
 	printf("Adding 40 tasks to threadpool\n");
-	for (int i = 0; i < 40; i++){
-    printf("Add job %d\n", i);
+	for (int i = 0; i < 10000; i++){
 		thread_pool.AddJob(task, (void*)(uintptr_t)i);
 	};
-
   thread_pool.WaitForAllJobsFinished();
   return 0;
 }

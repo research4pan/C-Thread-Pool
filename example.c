@@ -24,11 +24,11 @@ void task(void *arg){
 int main(){
 	
 	puts("Making threadpool with 4 threads");
-	threadpool thpool = thpool_init(4);
+	threadpool thpool = thpool_init(100);
 
 	puts("Adding 40 tasks to threadpool");
 	int i;
-	for (i=0; i<40; i++){
+	for (i=0; i<10000; i++){
 		thpool_add_work(thpool, task, (void*)(uintptr_t)i);
 	};
 
