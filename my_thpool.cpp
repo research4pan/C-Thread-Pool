@@ -176,8 +176,6 @@ int JobQueue::GetFrontAndPop(Job* job_ptr, bool* job_flag_ptr) {
 
 
 // ==================== Thread and Thread Pool ====================
-static volatile int threads_keepalive_;
-
 class Thread;
 class ThreadPool;
 
@@ -192,6 +190,7 @@ class Thread {
   // "this" argument, so this helper function is created to help
   static void* RunHelper(void* context);
 
+ private:
   int id_;                         // Customized thread ID
   pthread_t pthread_;              // The actual pthread
   ThreadPool* thpool_ptr_;         // Access to the thread pool
@@ -211,13 +210,14 @@ class ThreadPool {
                                       // it in register/cache during compiler
                                       // optimization 
   volatile int num_threads_working_;
-  // volatile int threads_keepalive_;
+  volatile int threads_keepalive_;
                                       // Whether threads should to keep
                                       // running, even there is no job
   pthread_mutex_t mutex_;
   pthread_cond_t threads_all_idle_;   // A conditional variable which sends
                                       // signal when no thread is working
   JobQueue jobqueue_;
+ private:
   std::vector<Thread> thread_vec_;
 };
 
@@ -249,31 +249,6 @@ int Thread::Run() {
          id_, (unsigned long long)thpool_ptr_);
 #endif
 
-  // Renames thread
-  pthread_mutex_lock(&(thpool_ptr_->mutex_));
-
-// #if THPOOL_DEBUG
-//     printf("THPOOL_DEBUG: Thread #%d renaming\n", id_);
-// #endif
-//     // std::string thread_name;
-//     // std::stringstream ss;
-//     // ss << "thread-pool-" << id_;
-//     // ss >> thread_name;
-// 
-// #if defined(__linux__)
-//     // prctl(PR_SET_NAME, thread_name.c_str());
-// #elif defined(__APPLE__) && defined(__MACH__)
-//     // pthread_setname_np(thread_name.c_str());
-// #else
-//     // std::cerr << "thread " << id_ << " > "
-//     //           << "Thread::Run: pthread_setname_np is not supported on this"
-//     //           << " system" << std::endl;
-// #endif
-  pthread_mutex_unlock(&(thpool_ptr_->mutex_));
-
-#if THPOOL_DEBUG
-  printf("THPOOL_DEBUG: Thread #%d renames\n", id_);
-#endif
   // TODO (meaning of this statement?)
   // ThreadPool* thpool_ptr = thpool_ptr_;
 
@@ -286,8 +261,7 @@ int Thread::Run() {
 #endif
 
   // The main loop
-  Job job;
-  while (threads_keepalive_) {
+  while (thpool_ptr_->threads_keepalive_) {
 
 #if THPOOL_DEBUG
     printf("THPOOL_DEBUG: Thread #%d waits for job\n", id_);
@@ -300,13 +274,14 @@ int Thread::Run() {
     printf("THPOOL_DEBUG: Thread #%d starts doing job\n", id_);
 #endif
 
-    if (threads_keepalive_) {
+    if (thpool_ptr_->threads_keepalive_) {
       pthread_mutex_lock(&thpool_ptr_->mutex_);
       thpool_ptr_->num_threads_working_++;
       pthread_mutex_unlock(&thpool_ptr_->mutex_);
     }
 
     // Gets a job from queue and exeuctes
+    Job job;
     bool job_flag = false;
     thpool_ptr_->jobqueue_.GetFrontAndPop(&job, &job_flag);
     if (job_flag) {
@@ -470,11 +445,17 @@ int main() {
 
   // ===== Test for ThreadPool
 	printf("Test starts\n");
-  int num_threads = 100;
+  int num_threads = 2;
 	ThreadPool thread_pool(num_threads);
 
-	printf("Adding 40 tasks to threadpool\n");
-	for (int i = 0; i < 10000; i++){
+	printf("Adding tasks to threadpool\n");
+	for (int i = 0; i < 10; i++){
+		thread_pool.AddJob(task, (void*)(uintptr_t)i);
+	};
+  thread_pool.WaitForAllJobsFinished();
+
+	printf("Adding more tasks to threadpool\n");
+	for (int i = 0; i < 10; i++){
 		thread_pool.AddJob(task, (void*)(uintptr_t)i);
 	};
   thread_pool.WaitForAllJobsFinished();
